@@ -17,10 +17,10 @@ def load_settings(file_path: str) -> List[Dict[str, Any]]:
     try:
         with open(file_path, 'r') as f:
             settings = json.load(f)
-        
+
         if not isinstance(settings, list):
             raise ValueError("Settings must be a list of domain configurations")
-        
+
         return settings
     except FileNotFoundError:
         print(f"Error: Settings file '{file_path}' not found")
@@ -32,11 +32,11 @@ def load_settings(file_path: str) -> List[Dict[str, Any]]:
 def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
     """Validate and normalize a single domain setting."""
     required_fields = ['domain', 'forwarding']
-    
+
     for field in required_fields:
         if field not in setting:
             raise ValueError(f"Missing required field '{field}' in domain configuration")
-    
+
     # Set defaults
     validated = {
         'domain': setting['domain'].strip(),
@@ -49,7 +49,7 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
         'compression': setting.get('compression', True),
         'security_headers': setting.get('security-headers', True)
     }
-    
+
     # Parse forwarding address
     if ':' in validated['forwarding']:
         host, port = validated['forwarding'].split(':', 1)
@@ -58,34 +58,34 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
     else:
         validated['host'] = validated['forwarding']
         validated['port'] = 80
-    
+
     # Generate upstream name
     validated['upstream_name'] = validated['domain'].replace('.', '_').replace('-', '_') + '_backend'
-    
+
     return validated
 
 def generate_upstream_blocks(settings: List[Dict[str, Any]]) -> str:
     """Generate upstream server blocks."""
     upstreams = []
-    
+
     for setting in settings:
         upstream = f"""    upstream {setting['upstream_name']} {{
         server {setting['host']}:{setting['port']};
         keepalive 32;
     }}"""
         upstreams.append(upstream)
-    
+
     return '\n\n'.join(upstreams)
 
 def generate_http_redirect_server(domains: List[str]) -> str:
     """Generate HTTP to HTTPS redirect server block."""
     domain_list = ' '.join(domains)
-    
+
     return f"""    # HTTP to HTTPS redirect
     server {{
         listen 80;
         server_name {domain_list};
-        
+
         # Allow Let's Encrypt ACME challenge
         location /.well-known/acme-challenge/ {{
             root /var/www/certbot;
@@ -101,7 +101,7 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
     """Generate SSL server block for a domain."""
     domain = setting['domain']
     upstream_name = setting['upstream_name']
-    
+
     # SSL certificate paths
     if setting['ca_bundle'] and setting['private_key']:
         ssl_cert = f"/etc/nginx/ssl/{setting['ca_bundle']}"
@@ -110,7 +110,7 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
         # Default Let's Encrypt style paths
         ssl_cert = f"/etc/nginx/ssl/{domain}/fullchain.pem"
         ssl_key = f"/etc/nginx/ssl/{domain}/privkey.pem"
-    
+
     # Security headers
     security_headers = ""
     if setting['security_headers']:
@@ -121,7 +121,7 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "no-referrer-when-downgrade" always;
         add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;'''
-    
+
     # WebSocket support
     websocket_headers = ""
     if setting['websocket']:
@@ -130,7 +130,7 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";'''
-    
+
     # Rate limiting
     rate_limit = ""
     if setting['rate_limit'] > 0:
@@ -144,10 +144,11 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
         }}'''
-    
+
     server_block = f"""    # {domain} - Forward to {setting['host']}:{setting['port']}
     server {{
-        listen 443 ssl http2;
+        listen 443 ssl;
+        http2 on;
         server_name {domain};
 
         ssl_certificate {ssl_cert};
@@ -162,25 +163,25 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header X-Forwarded-Host $host;
             proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
-            
+
             # Timeouts
             proxy_connect_timeout 60s;
             proxy_send_timeout 60s;
             proxy_read_timeout 60s;
         }}{rate_limit}
     }}"""
-    
+
     return server_block
 
 def generate_nginx_config(settings: List[Dict[str, Any]]) -> str:
     """Generate complete nginx configuration."""
-    
+
     # Extract domains for HTTP redirect
     ssl_domains = [s['domain'] for s in settings if s['ssl']]
-    
+
     # Check if compression is enabled for any domain
     compression_enabled = any(s['compression'] for s in settings)
-    
+
     # Gzip configuration
     gzip_config = ""
     if compression_enabled:
@@ -201,7 +202,7 @@ def generate_nginx_config(settings: List[Dict[str, Any]]) -> str:
         application/xml+rss
         application/atom+xml
         image/svg+xml;"""
-    
+
     # Rate limiting zones
     rate_limit_zones = ""
     if any(s['rate_limit'] > 0 for s in settings):
@@ -209,21 +210,21 @@ def generate_nginx_config(settings: List[Dict[str, Any]]) -> str:
     # Rate limiting
     limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
     limit_req_zone $binary_remote_addr zone=api:10m rate=100r/m;"""
-    
+
     # Generate upstream blocks
     upstream_blocks = generate_upstream_blocks(settings)
-    
+
     # Generate HTTP redirect server
     http_redirect = ""
     if ssl_domains:
         http_redirect = generate_http_redirect_server(ssl_domains)
-    
+
     # Generate SSL server blocks
     ssl_servers = []
     for setting in settings:
         if setting['ssl']:
             ssl_servers.append(generate_ssl_server_block(setting))
-    
+
     # Complete configuration
     config = f"""events {{
     worker_connections 1024;
@@ -262,7 +263,7 @@ http {{
 
 {chr(10).join(ssl_servers)}
 }}"""
-    
+
     return config
 
 def main():
@@ -271,21 +272,21 @@ def main():
     parser.add_argument('--input', '-i', default='settings.json', help='Input settings file (default: settings.json)')
     parser.add_argument('--output', '-o', default='nginx-proxy.conf', help='Output nginx config file (default: nginx-proxy.conf)')
     parser.add_argument('--dry-run', action='store_true', help='Print configuration to stdout instead of writing to file')
-    
+
     args = parser.parse_args()
-    
+
     # Load and validate settings
     settings_data = load_settings(args.input)
-    
+
     try:
         validated_settings = [validate_setting(setting) for setting in settings_data]
     except ValueError as e:
         print(f"Error: {e}")
         sys.exit(1)
-    
+
     # Generate configuration
     nginx_config = generate_nginx_config(validated_settings)
-    
+
     if args.dry_run:
         print(nginx_config)
     else:

@@ -2,7 +2,7 @@
 /**
  * Nginx Proxy Configuration Generator
  * Converts settings.json to nginx-proxy.conf
- * 
+ *
  * Usage: node generate_nginx_config.js [--input settings.json] [--output nginx-proxy.conf]
  */
 
@@ -18,11 +18,11 @@ class NginxConfigGenerator {
         try {
             const data = fs.readFileSync(filePath, 'utf8');
             const settings = JSON.parse(data);
-            
+
             if (!Array.isArray(settings)) {
                 throw new Error('Settings must be a list of domain configurations');
             }
-            
+
             return settings;
         } catch (error) {
             if (error.code === 'ENOENT') {
@@ -38,7 +38,7 @@ class NginxConfigGenerator {
 
     validateSetting(setting) {
         const requiredFields = ['domain', 'forwarding'];
-        
+
         for (const field of requiredFields) {
             if (!(field in setting)) {
                 throw new Error(`Missing required field '${field}' in domain configuration`);
@@ -75,24 +75,24 @@ class NginxConfigGenerator {
     }
 
     generateUpstreamBlocks(settings) {
-        const upstreams = settings.map(setting => 
+        const upstreams = settings.map(setting =>
             `    upstream ${setting.upstream_name} {\n` +
             `        server ${setting.host}:${setting.port};\n` +
             `        keepalive 32;\n` +
             `    }`
         );
-        
+
         return upstreams.join('\n\n');
     }
 
     generateHttpRedirectServer(domains) {
         const domainList = domains.join(' ');
-        
+
         return `    # HTTP to HTTPS redirect
     server {
         listen 80;
         server_name ${domainList};
-        
+
         # Allow Let's Encrypt ACME challenge
         location /.well-known/acme-challenge/ {
             root /var/www/certbot;
@@ -107,7 +107,7 @@ class NginxConfigGenerator {
 
     generateSslServerBlock(setting) {
         const { domain, upstream_name, host, port } = setting;
-        
+
         // SSL certificate paths
         let ssl_cert, ssl_key;
         if (setting.ca_bundle && setting.private_key) {
@@ -149,7 +149,8 @@ class NginxConfigGenerator {
 
         return `    # ${domain} - Forward to ${host}:${port}
     server {
-        listen 443 ssl http2;
+        listen 443 ssl;
+        http2 on;
         server_name ${domain};
 
         ssl_certificate ${ssl_cert};
@@ -164,7 +165,7 @@ class NginxConfigGenerator {
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header X-Forwarded-Host $host;
             proxy_set_header X-Forwarded-Port $server_port;${websocketHeaders}
-            
+
             # Timeouts
             proxy_connect_timeout 60s;
             proxy_send_timeout 60s;
@@ -176,10 +177,10 @@ class NginxConfigGenerator {
     generateNginxConfig(settings) {
         // Extract domains for HTTP redirect
         const sslDomains = settings.filter(s => s.ssl).map(s => s.domain);
-        
+
         // Check if compression is enabled for any domain
         const compressionEnabled = settings.some(s => s.compression);
-        
+
         // Gzip configuration
         const gzipConfig = compressionEnabled ? `
     # Gzip compression
@@ -291,13 +292,13 @@ ${sslServers}
 
         // Load and validate settings
         const settingsData = this.loadSettings(inputFile);
-        
+
         try {
             const validatedSettings = settingsData.map(setting => this.validateSetting(setting));
-            
+
             // Generate configuration
             const nginxConfig = this.generateNginxConfig(validatedSettings);
-            
+
             if (dryRun) {
                 console.log(nginxConfig);
             } else {
