@@ -1,0 +1,16 @@
+[
+    {
+        "domain": "example.com",
+        "forwarding": "127.0.0.1:3003",
+        "ssl": true,
+        "ca-bundle": "cert/example.com/ca-bundle.txt",
+        "private-key": "cert/example.com/private-key.txt"
+    },
+    {
+        "domain": "api.example.com",
+        "forwarding": "192.168.1.100:8000",
+        "ssl": true,
+        "rate-limit": 200,
+        "websocket": false
+    }
+]
