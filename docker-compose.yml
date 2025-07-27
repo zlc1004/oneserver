@@ -1,0 +1,13 @@
+services:
+  # Nginx reverse proxy
+  proxy-nginx:
+    image: nginx:alpine
+    container_name: proxy-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-proxy.conf:/etc/nginx/nginx.conf:ro
+      - ./cert:/etc/nginx/ssl:ro
+      - ./nginx-logs:/var/log/nginx
+    restart: unless-stopped
