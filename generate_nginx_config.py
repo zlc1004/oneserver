@@ -44,7 +44,6 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
         'ssl': setting.get('ssl', True),
         'ca_bundle': setting.get('ca-bundle', ''),
         'private_key': setting.get('private-key', ''),
-        'rate_limit': setting.get('rate-limit', 100),
         'websocket': setting.get('websocket', True),
         'compression': setting.get('compression', True),
         'security_headers': setting.get('security-headers', True)
@@ -133,17 +132,6 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
 
     # Rate limiting
     rate_limit = ""
-    if setting['rate_limit'] > 0:
-        rate_limit = f'''
-        # API endpoints with rate limiting
-        location /api/ {{
-            limit_req zone=api burst=20 nodelay;
-            proxy_pass http://{upstream_name};
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }}'''
 
     server_block = f"""    # {domain} - Forward to {setting['host']}:{setting['port']}
     server {{
@@ -205,11 +193,6 @@ def generate_nginx_config(settings: List[Dict[str, Any]]) -> str:
 
     # Rate limiting zones
     rate_limit_zones = ""
-    if any(s['rate_limit'] > 0 for s in settings):
-        rate_limit_zones = """
-    # Rate limiting
-    limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
-    limit_req_zone $binary_remote_addr zone=api:10m rate=100r/m;"""
 
     # Generate upstream blocks
     upstream_blocks = generate_upstream_blocks(settings)
@@ -224,6 +207,9 @@ def generate_nginx_config(settings: List[Dict[str, Any]]) -> str:
     for setting in settings:
         if setting['ssl']:
             ssl_servers.append(generate_ssl_server_block(setting))
+
+    # Join SSL servers with double newlines
+    ssl_servers_text = "\n\n".join(ssl_servers) if ssl_servers else ""
 
     # Complete configuration
     config = f"""events {{
@@ -261,7 +247,7 @@ http {{
 
 {http_redirect}
 
-{chr(10).join(ssl_servers)}
+{ssl_servers_text}
 }}"""
 
     return config

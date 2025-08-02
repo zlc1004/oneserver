@@ -52,7 +52,6 @@ class NginxConfigGenerator {
             ssl: setting.ssl !== undefined ? setting.ssl : true,
             ca_bundle: setting['ca-bundle'] || '',
             private_key: setting['private-key'] || '',
-            rate_limit: setting['rate-limit'] || 100,
             websocket: setting.websocket !== undefined ? setting.websocket : true,
             compression: setting.compression !== undefined ? setting.compression : true,
             security_headers: setting['security-headers'] !== undefined ? setting['security-headers'] : true
@@ -136,16 +135,7 @@ class NginxConfigGenerator {
             proxy_set_header Connection "upgrade";` : '';
 
         // Rate limiting
-        const rateLimit = setting.rate_limit > 0 ? `
-        # API endpoints with rate limiting
-        location /api/ {
-            limit_req zone=api burst=20 nodelay;
-            proxy_pass http://${upstream_name};
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }` : '';
+        const rateLimit = '';
 
         return `    # ${domain} - Forward to ${host}:${port}
     server {
@@ -201,10 +191,7 @@ class NginxConfigGenerator {
         image/svg+xml;` : '';
 
         // Rate limiting zones
-        const rateLimitZones = settings.some(s => s.rate_limit > 0) ? `
-    # Rate limiting
-    limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
-    limit_req_zone $binary_remote_addr zone=api:10m rate=100r/m;` : '';
+        const rateLimitZones = '';
 
         // Generate upstream blocks
         const upstreamBlocks = this.generateUpstreamBlocks(settings);
