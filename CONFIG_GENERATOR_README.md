@@ -45,6 +45,12 @@ node generate_nginx_config.js --dry-run
         "ssl": true,
         "rate-limit": 200,
         "websocket": false
+    },
+    {
+        "domain": "dev.example.com",
+        "forwarding": "host.docker.internal:50030",
+        "ssl": true,
+        "http": true
     }
 ]
 ```
@@ -59,6 +65,7 @@ node generate_nginx_config.js --dry-run
 - **`ssl`**: Enable HTTPS (default: `true`)
 - **`ca-bundle`**: Path to SSL certificate file (relative to `/etc/nginx/ssl/`)
 - **`private-key`**: Path to SSL private key file (relative to `/etc/nginx/ssl/`)
+- **`http`**: Allow HTTP forwarding instead of redirecting to HTTPS (default: `false`)
 - **`rate-limit`**: API rate limiting per minute (default: `100`, set to `0` to disable)
 - **`websocket`**: Enable WebSocket support (default: `true`)
 - **`compression`**: Enable gzip compression (default: `true`)
@@ -88,18 +95,45 @@ This will use:
 - Certificate: `/etc/nginx/ssl/example.com/fullchain.pem`
 - Private Key: `/etc/nginx/ssl/example.com/privkey.pem`
 
+## 🔀 HTTP Forwarding vs HTTPS Redirect
+
+### Option 1: HTTP Forwarding (http: true)
+```json
+{
+    "domain": "dev.example.com",
+    "forwarding": "host.docker.internal:50030",
+    "ssl": true,
+    "http": true
+}
+```
+- HTTP requests to `http://dev.example.com/test` are forwarded to `http://host.docker.internal:50030/test`
+- HTTPS requests to `https://dev.example.com/test` are forwarded to `http://host.docker.internal:50030/test`
+- Useful for development environments or when backend doesn't support HTTPS
+
+### Option 2: HTTPS Redirect (http: false, default)
+```json
+{
+    "domain": "example.com",
+    "forwarding": "127.0.0.1:3000",
+    "ssl": true
+}
+```
+- HTTP requests to `http://example.com/test` are redirected to `https://example.com/test`
+- Only HTTPS requests reach the backend
+- Recommended for production environments
+
 ## 🎯 Generated Features
 
 The scripts automatically generate:
 
-✅ **HTTP to HTTPS redirects**  
-✅ **SSL/TLS configuration** with modern cipher suites  
-✅ **Security headers** (XSS, CSRF, etc.)  
-✅ **Rate limiting** for API endpoints  
-✅ **WebSocket support** for real-time apps  
-✅ **Gzip compression** for better performance  
-✅ **Proper proxy headers** for backend services  
-✅ **Connection timeouts** and keep-alive settings  
+✅ **HTTP to HTTPS redirects**
+✅ **SSL/TLS configuration** with modern cipher suites
+✅ **Security headers** (XSS, CSRF, etc.)
+✅ **Rate limiting** for API endpoints
+✅ **WebSocket support** for real-time apps
+✅ **Gzip compression** for better performance
+✅ **Proper proxy headers** for backend services
+✅ **Connection timeouts** and keep-alive settings
 
 ## 📁 Example Settings for Multiple Domains
 
@@ -129,6 +163,13 @@ The scripts automatically generate:
         "forwarding": "192.168.1.50:80",
         "ssl": false,
         "compression": false
+    },
+    {
+        "domain": "dev.website.com",
+        "forwarding": "host.docker.internal:3001",
+        "ssl": true,
+        "http": true,
+        "security-headers": false
     }
 ]
 ```
