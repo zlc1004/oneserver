@@ -44,6 +44,7 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
         'ssl': setting.get('ssl', True),
         'ca_bundle': setting.get('ca-bundle', ''),
         'private_key': setting.get('private-key', ''),
+        'http': setting.get('http', False),
         'websocket': setting.get('websocket', True),
         'compression': setting.get('compression', True),
         'security_headers': setting.get('security-headers', True)
@@ -76,11 +77,18 @@ def generate_upstream_blocks(settings: List[Dict[str, Any]]) -> str:
 
     return '\n\n'.join(upstreams)
 
-def generate_http_redirect_server(domains: List[str]) -> str:
-    """Generate HTTP to HTTPS redirect server block."""
-    domain_list = ' '.join(domains)
+def generate_http_redirect_server(settings: List[Dict[str, Any]]) -> str:
+    """Generate HTTP server blocks for redirect or forwarding."""
+    # Separate domains by HTTP handling preference
+    redirect_domains = [s['domain'] for s in settings if s['ssl'] and not s['http']]
+    forward_settings = [s for s in settings if s['http']]
 
-    return f"""    # HTTP to HTTPS redirect
+    blocks = []
+
+    # HTTP to HTTPS redirect server for domains that don't allow HTTP forwarding
+    if redirect_domains:
+        domain_list = ' '.join(redirect_domains)
+        redirect_block = f"""    # HTTP to HTTPS redirect
     server {{
         listen 80;
         server_name {domain_list};
@@ -95,6 +103,51 @@ def generate_http_redirect_server(domains: List[str]) -> str:
             return 301 https://$server_name$request_uri;
         }}
     }}"""
+        blocks.append(redirect_block)
+
+    # HTTP forwarding servers for domains that allow HTTP
+    for setting in forward_settings:
+        domain = setting['domain']
+        upstream_name = setting['upstream_name']
+
+        # WebSocket support
+        websocket_headers = ""
+        if setting['websocket']:
+            websocket_headers = '''
+            # WebSocket support
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";'''
+
+        forward_block = f"""    # {domain} - HTTP forwarding to {setting['host']}:{setting['port']}
+    server {{
+        listen 80;
+        server_name {domain};
+
+        # Allow Let's Encrypt ACME challenge
+        location /.well-known/acme-challenge/ {{
+            root /var/www/certbot;
+        }}
+
+        # Forward traffic to backend
+        location / {{
+            proxy_pass http://{upstream_name};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
+
+            # Timeouts
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+        }}
+    }}"""
+        blocks.append(forward_block)
+
+    return '\n\n'.join(blocks)
 
 def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
     """Generate SSL server block for a domain."""
@@ -164,9 +217,6 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
 def generate_nginx_config(settings: List[Dict[str, Any]]) -> str:
     """Generate complete nginx configuration."""
 
-    # Extract domains for HTTP redirect
-    ssl_domains = [s['domain'] for s in settings if s['ssl']]
-
     # Check if compression is enabled for any domain
     compression_enabled = any(s['compression'] for s in settings)
 
@@ -197,10 +247,10 @@ def generate_nginx_config(settings: List[Dict[str, Any]]) -> str:
     # Generate upstream blocks
     upstream_blocks = generate_upstream_blocks(settings)
 
-    # Generate HTTP redirect server
-    http_redirect = ""
-    if ssl_domains:
-        http_redirect = generate_http_redirect_server(ssl_domains)
+    # Generate HTTP server blocks (redirect or forward)
+    http_servers = ""
+    if settings:
+        http_servers = generate_http_redirect_server(settings)
 
     # Generate SSL server blocks
     ssl_servers = []
@@ -245,7 +295,7 @@ http {{
     # Upstream servers
 {upstream_blocks}
 
-{http_redirect}
+{http_servers}
 
 {ssl_servers_text}
 }}"""
@@ -284,7 +334,8 @@ def main():
             print(f"📁 Configured {len(validated_settings)} domain(s):")
             for setting in validated_settings:
                 ssl_status = "🔒 HTTPS" if setting['ssl'] else "🔓 HTTP"
-                print(f"   - {setting['domain']} → {setting['host']}:{setting['port']} ({ssl_status})")
+                http_status = " + HTTP forwarding" if setting['http'] else ""
+                print(f"   - {setting['domain']} → {setting['host']}:{setting['port']} ({ssl_status}{http_status})")
         except IOError as e:
             print(f"Error writing to '{args.output}': {e}")
             sys.exit(1)

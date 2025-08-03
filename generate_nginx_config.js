@@ -52,6 +52,7 @@ class NginxConfigGenerator {
             ssl: setting.ssl !== undefined ? setting.ssl : true,
             ca_bundle: setting['ca-bundle'] || '',
             private_key: setting['private-key'] || '',
+            http: setting.http !== undefined ? setting.http : false,
             websocket: setting.websocket !== undefined ? setting.websocket : true,
             compression: setting.compression !== undefined ? setting.compression : true,
             security_headers: setting['security-headers'] !== undefined ? setting['security-headers'] : true
@@ -84,10 +85,17 @@ class NginxConfigGenerator {
         return upstreams.join('\n\n');
     }
 
-    generateHttpRedirectServer(domains) {
-        const domainList = domains.join(' ');
+    generateHttpRedirectServer(settings) {
+        // Separate domains by HTTP handling preference
+        const redirectDomains = settings.filter(s => s.ssl && !s.http).map(s => s.domain);
+        const forwardSettings = settings.filter(s => s.http);
 
-        return `    # HTTP to HTTPS redirect
+        const blocks = [];
+
+        // HTTP to HTTPS redirect server for domains that don't allow HTTP forwarding
+        if (redirectDomains.length > 0) {
+            const domainList = redirectDomains.join(' ');
+            const redirectBlock = `    # HTTP to HTTPS redirect
     server {
         listen 80;
         server_name ${domainList};
@@ -102,6 +110,50 @@ class NginxConfigGenerator {
             return 301 https://$server_name$request_uri;
         }
     }`;
+            blocks.push(redirectBlock);
+        }
+
+        // HTTP forwarding servers for domains that allow HTTP
+        for (const setting of forwardSettings) {
+            const { domain, upstream_name, host, port } = setting;
+
+            // WebSocket support
+            const websocketHeaders = setting.websocket ? `
+            # WebSocket support
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";` : '';
+
+            const forwardBlock = `    # ${domain} - HTTP forwarding to ${host}:${port}
+    server {
+        listen 80;
+        server_name ${domain};
+
+        # Allow Let's Encrypt ACME challenge
+        location /.well-known/acme-challenge/ {
+            root /var/www/certbot;
+        }
+
+        # Forward traffic to backend
+        location / {
+            proxy_pass http://${upstream_name};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Port $server_port;${websocketHeaders}
+
+            # Timeouts
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+        }
+    }`;
+            blocks.push(forwardBlock);
+        }
+
+        return blocks.join('\n\n');
     }
 
     generateSslServerBlock(setting) {
@@ -165,9 +217,6 @@ class NginxConfigGenerator {
     }
 
     generateNginxConfig(settings) {
-        // Extract domains for HTTP redirect
-        const sslDomains = settings.filter(s => s.ssl).map(s => s.domain);
-
         // Check if compression is enabled for any domain
         const compressionEnabled = settings.some(s => s.compression);
 
@@ -196,8 +245,8 @@ class NginxConfigGenerator {
         // Generate upstream blocks
         const upstreamBlocks = this.generateUpstreamBlocks(settings);
 
-        // Generate HTTP redirect server
-        const httpRedirect = sslDomains.length > 0 ? this.generateHttpRedirectServer(sslDomains) : '';
+        // Generate HTTP server blocks (redirect or forward)
+        const httpServers = settings.length > 0 ? this.generateHttpRedirectServer(settings) : '';
 
         // Generate SSL server blocks
         const sslServers = settings
@@ -239,7 +288,7 @@ http {
     # Upstream servers
 ${upstreamBlocks}
 
-${httpRedirect}
+${httpServers}
 
 ${sslServers}
 }`;
@@ -296,7 +345,8 @@ ${sslServers}
                     console.log(`📁 Configured ${validatedSettings.length} domain(s):`);
                     validatedSettings.forEach(setting => {
                         const sslStatus = setting.ssl ? "🔒 HTTPS" : "🔓 HTTP";
-                        console.log(`   - ${setting.domain} → ${setting.host}:${setting.port} (${sslStatus})`);
+                        const httpStatus = setting.http ? " + HTTP forwarding" : "";
+                        console.log(`   - ${setting.domain} → ${setting.host}:${setting.port} (${sslStatus}${httpStatus})`);
                     });
                 } catch (error) {
                     console.error(`Error writing to '${outputFile}': ${error.message}`);
