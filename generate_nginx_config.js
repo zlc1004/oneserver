@@ -45,6 +45,15 @@ class NginxConfigGenerator {
             }
         }
 
+        // Handle rate-limit (can be number or object)
+        let rateLimit = setting['rate-limit'] || {};
+        if (typeof rateLimit === 'number') {
+            // Convert number to object format for consistency
+            rateLimit = {'/': rateLimit};
+        } else if (typeof rateLimit !== 'object' || rateLimit === null) {
+            rateLimit = {};
+        }
+
         // Set defaults and normalize
         const validated = {
             domain: setting.domain.trim(),
@@ -53,6 +62,7 @@ class NginxConfigGenerator {
             ca_bundle: setting['ca-bundle'] || '',
             private_key: setting['private-key'] || '',
             http: setting.http !== undefined ? setting.http : false,
+            rate_limit: rateLimit,
             websocket: setting.websocket !== undefined ? setting.websocket : true,
             compression: setting.compression !== undefined ? setting.compression : true,
             security_headers: setting['security-headers'] !== undefined ? setting['security-headers'] : true
@@ -186,18 +196,53 @@ class NginxConfigGenerator {
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";` : '';
 
-        // Rate limiting
-        const rateLimit = '';
+        // Rate limiting locations
+        let rateLimitLocations = '';
+        if (Object.keys(setting.rate_limit).length > 0) {
+            const domainSafe = domain.replace(/\./g, '_').replace(/-/g, '_');
+            const locations = [];
 
-        return `    # ${domain} - Forward to ${host}:${port}
-    server {
-        listen 443 ssl;
-        http2 on;
-        server_name ${domain};
+            // Sort paths by specificity (longer/more specific first)
+            const sortedPaths = Object.entries(setting.rate_limit).sort((a, b) => b[0].length - a[0].length || a[0].localeCompare(b[0]));
 
-        ssl_certificate ${ssl_cert};
-        ssl_certificate_key ${ssl_key};${securityHeaders}
+            for (const [path, rate] of sortedPaths) {
+                if (rate > 0) {
+                    let zoneName = `${domainSafe}_${path.replace(/\//g, '_').replace(/\*/g, 'wildcard')}_zone`;
+                    zoneName = zoneName.replace(/__/g, '_').replace(/^_|_$/g, '');
 
+                    // Convert nginx-style wildcards
+                    const nginxPath = path.replace(/\*/g, '.*');
+                    const locationType = path.includes('*') ? '~ ' : '';
+
+                    const locationBlock = `
+        # Rate limited: ${rate} requests/minute for ${path}
+        location ${locationType}${nginxPath} {
+            limit_req zone=${zoneName} burst=5 nodelay;
+
+            proxy_pass http://${upstream_name};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Port $server_port;${websocketHeaders}
+
+            # Timeouts
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+        }`;
+                    locations.push(locationBlock);
+                }
+            }
+
+            rateLimitLocations = locations.join('');
+        }
+
+        // Main location block (only if no rate limiting or no root path rate limit)
+        let mainLocation = '';
+        if (Object.keys(setting.rate_limit).length === 0 || !setting.rate_limit.hasOwnProperty('/')) {
+            mainLocation = `
         # Main application
         location / {
             proxy_pass http://${upstream_name};
@@ -212,8 +257,39 @@ class NginxConfigGenerator {
             proxy_connect_timeout 60s;
             proxy_send_timeout 60s;
             proxy_read_timeout 60s;
-        }${rateLimit}
+        }`;
+        }
+
+        return `    # ${domain} - Forward to ${host}:${port}
+    server {
+        listen 443 ssl;
+        http2 on;
+        server_name ${domain};
+
+        ssl_certificate ${ssl_cert};
+        ssl_certificate_key ${ssl_key};${securityHeaders}${mainLocation}${rateLimitLocations}
     }`;
+    }
+
+    generateRateLimitZones(settings) {
+        const zones = [];
+
+        for (const setting of settings) {
+            const domainSafe = setting.domain.replace(/\./g, '_').replace(/-/g, '_');
+
+            for (const [path, rate] of Object.entries(setting.rate_limit)) {
+                if (rate > 0) { // Only create zones for positive rates
+                    let zoneName = `${domainSafe}_${path.replace(/\//g, '_').replace(/\*/g, 'wildcard')}_zone`;
+                    zoneName = zoneName.replace(/__/g, '_').replace(/^_|_$/g, '');
+                    zones.push(`    limit_req_zone $binary_remote_addr zone=${zoneName}:10m rate=${Math.floor(rate)}r/m;`);
+                }
+            }
+        }
+
+        if (zones.length > 0) {
+            return '\n    # Rate limiting zones\n' + zones.join('\n');
+        }
+        return '';
     }
 
     generateNginxConfig(settings) {
@@ -240,7 +316,7 @@ class NginxConfigGenerator {
         image/svg+xml;` : '';
 
         // Rate limiting zones
-        const rateLimitZones = '';
+        const rateLimitZones = this.generateRateLimitZones(settings);
 
         // Generate upstream blocks
         const upstreamBlocks = this.generateUpstreamBlocks(settings);

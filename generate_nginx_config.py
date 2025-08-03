@@ -37,6 +37,14 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
         if field not in setting:
             raise ValueError(f"Missing required field '{field}' in domain configuration")
 
+    # Handle rate-limit (can be number or object)
+    rate_limit = setting.get('rate-limit', {})
+    if isinstance(rate_limit, (int, float)):
+        # Convert number to object format for consistency
+        rate_limit = {'/': rate_limit}
+    elif not isinstance(rate_limit, dict):
+        rate_limit = {}
+
     # Set defaults
     validated = {
         'domain': setting['domain'].strip(),
@@ -45,6 +53,7 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
         'ca_bundle': setting.get('ca-bundle', ''),
         'private_key': setting.get('private-key', ''),
         'http': setting.get('http', False),
+        'rate_limit': rate_limit,
         'websocket': setting.get('websocket', True),
         'compression': setting.get('compression', True),
         'security_headers': setting.get('security-headers', True)
@@ -183,18 +192,50 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";'''
 
-    # Rate limiting
-    rate_limit = ""
+    # Rate limiting locations
+    rate_limit_locations = ""
+    if setting['rate_limit']:
+        domain_safe = domain.replace('.', '_').replace('-', '_')
+        locations = []
 
-    server_block = f"""    # {domain} - Forward to {setting['host']}:{setting['port']}
-    server {{
-        listen 443 ssl;
-        http2 on;
-        server_name {domain};
+        # Sort paths by specificity (longer/more specific first)
+        sorted_paths = sorted(setting['rate_limit'].items(), key=lambda x: (-len(x[0]), x[0]))
 
-        ssl_certificate {ssl_cert};
-        ssl_certificate_key {ssl_key};{security_headers}
+        for path, rate in sorted_paths:
+            if rate > 0:
+                zone_name = f"{domain_safe}_{path.replace('/', '_').replace('*', 'wildcard')}_zone"
+                zone_name = zone_name.replace('__', '_').strip('_')
 
+                # Convert nginx-style wildcards
+                nginx_path = path.replace('*', '.*')
+                location_type = "~ " if '*' in path else ""
+
+                location_block = f"""
+        # Rate limited: {rate} requests/minute for {path}
+        location {location_type}{nginx_path} {{
+            limit_req zone={zone_name} burst=5 nodelay;
+
+            proxy_pass http://{upstream_name};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
+
+            # Timeouts
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+        }}"""
+                locations.append(location_block)
+
+        rate_limit_locations = ''.join(locations)
+
+    # Main location block (only if no rate limiting or no root path rate limit)
+    main_location = ""
+    if not setting['rate_limit'] or '/' not in setting['rate_limit']:
+        main_location = f"""
         # Main application
         location / {{
             proxy_pass http://{upstream_name};
@@ -209,10 +250,36 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
             proxy_connect_timeout 60s;
             proxy_send_timeout 60s;
             proxy_read_timeout 60s;
-        }}{rate_limit}
+        }}"""
+
+    server_block = f"""    # {domain} - Forward to {setting['host']}:{setting['port']}
+    server {{
+        listen 443 ssl;
+        http2 on;
+        server_name {domain};
+
+        ssl_certificate {ssl_cert};
+        ssl_certificate_key {ssl_key};{security_headers}{main_location}{rate_limit_locations}
     }}"""
 
     return server_block
+
+def generate_rate_limit_zones(settings: List[Dict[str, Any]]) -> str:
+    """Generate rate limiting zones for nginx."""
+    zones = []
+
+    for setting in settings:
+        domain_safe = setting['domain'].replace('.', '_').replace('-', '_')
+
+        for path, rate in setting['rate_limit'].items():
+            if rate > 0:  # Only create zones for positive rates
+                zone_name = f"{domain_safe}_{path.replace('/', '_').replace('*', 'wildcard')}_zone"
+                zone_name = zone_name.replace('__', '_').strip('_')
+                zones.append(f"    limit_req_zone $binary_remote_addr zone={zone_name}:10m rate={int(rate)}r/m;")
+
+    if zones:
+        return "\n    # Rate limiting zones\n" + "\n".join(zones)
+    return ""
 
 def generate_nginx_config(settings: List[Dict[str, Any]]) -> str:
     """Generate complete nginx configuration."""
@@ -242,7 +309,7 @@ def generate_nginx_config(settings: List[Dict[str, Any]]) -> str:
         image/svg+xml;"""
 
     # Rate limiting zones
-    rate_limit_zones = ""
+    rate_limit_zones = generate_rate_limit_zones(settings)
 
     # Generate upstream blocks
     upstream_blocks = generate_upstream_blocks(settings)

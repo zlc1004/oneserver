@@ -43,7 +43,11 @@ node generate_nginx_config.js --dry-run
         "domain": "api.example.com",
         "forwarding": "192.168.1.100:8000",
         "ssl": true,
-        "rate-limit": 200,
+        "rate-limit": {
+            "/": 100,
+            "/api": 10,
+            "/upload": 2
+        },
         "websocket": false
     },
     {
@@ -66,7 +70,7 @@ node generate_nginx_config.js --dry-run
 - **`ca-bundle`**: Path to SSL certificate file (relative to `/etc/nginx/ssl/`)
 - **`private-key`**: Path to SSL private key file (relative to `/etc/nginx/ssl/`)
 - **`http`**: Allow HTTP forwarding instead of redirecting to HTTPS (default: `false`)
-- **`rate-limit`**: API rate limiting per minute (default: `100`, set to `0` to disable)
+- **`rate-limit`**: Rate limiting per minute - can be a number (applies to all paths) or object with path-specific limits (default: no limits)
 - **`websocket`**: Enable WebSocket support (default: `true`)
 - **`compression`**: Enable gzip compression (default: `true`)
 - **`security-headers`**: Enable security headers (default: `true`)
@@ -122,6 +126,43 @@ This will use:
 - Only HTTPS requests reach the backend
 - Recommended for production environments
 
+## 🚦 Rate Limiting Configuration
+
+### Option 1: Simple Rate Limiting (Legacy)
+```json
+{
+    "domain": "api.example.com",
+    "forwarding": "127.0.0.1:8000",
+    "rate-limit": 100
+}
+```
+- Applies 100 requests/minute limit to all paths
+
+### Option 2: Path-Specific Rate Limiting
+```json
+{
+    "domain": "api.example.com",
+    "forwarding": "127.0.0.1:8000",
+    "rate-limit": {
+        "/": 200,
+        "/api": 50,
+        "/api/upload": 5,
+        "/test/*/endpoint": 10
+    }
+}
+```
+- **`"/"`**: 200 requests/minute for root and unmatched paths
+- **`"/api"`**: 50 requests/minute for API endpoints
+- **`"/api/upload"`**: 5 requests/minute for upload endpoint (more specific, takes precedence)
+- **`"/test/*/endpoint"`**: 10 requests/minute for wildcard pattern (matches `/test/abc/endpoint`, `/test/123/endpoint`, etc.)
+
+### Rate Limiting Features
+✅ **Path specificity**: More specific paths take precedence over general ones
+✅ **Wildcard support**: Use `*` for pattern matching
+✅ **Burst handling**: Includes burst=5 nodelay for smooth traffic handling
+✅ **Per-domain zones**: Each domain gets separate rate limiting zones
+✅ **Backward compatibility**: Number format still works as before
+
 ## 🎯 Generated Features
 
 The scripts automatically generate:
@@ -148,7 +189,11 @@ The scripts automatically generate:
         "domain": "api.website.com",
         "forwarding": "127.0.0.1:8000",
         "ssl": true,
-        "rate-limit": 500,
+        "rate-limit": {
+            "/": 300,
+            "/api/v1": 100,
+            "/api/v1/upload": 10
+        },
         "websocket": false
     },
     {
