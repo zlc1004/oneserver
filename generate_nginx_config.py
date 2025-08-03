@@ -109,7 +109,7 @@ def generate_http_redirect_server(settings: List[Dict[str, Any]]) -> str:
 
         # Redirect all other traffic to HTTPS
         location / {{
-            return 301 https://$server_name$request_uri;
+            return 301 https://$host$request_uri;
         }}
     }}"""
         blocks.append(redirect_block)

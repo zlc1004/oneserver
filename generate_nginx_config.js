@@ -117,7 +117,7 @@ class NginxConfigGenerator {
 
         # Redirect all other traffic to HTTPS
         location / {
-            return 301 https://$server_name$request_uri;
+            return 301 https://$host$request_uri;
         }
     }`;
             blocks.push(redirectBlock);
