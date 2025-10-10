@@ -22,4 +22,5 @@ nginx -t
 
 # Start nginx
 echo "🌐 Starting nginx..."
-exec nginx -g "daemon off;"
+
+/docker-entrypoint.sh
