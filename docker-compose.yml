@@ -9,7 +9,6 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./settings.json:/app/settings.json:ro
       - ./cert:/etc/nginx/ssl:ro
       - ./nginx-logs:/var/log/nginx
     restart: unless-stopped
