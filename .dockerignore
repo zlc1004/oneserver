@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Keep entrypoint.sh - it's needed for the build
+# entrypoint.sh
+
+# SSL certificates (should be mounted as volumes)
+ssl/
+cert/
+certs/
+
+# Generated files
+nginx-proxy.conf
+*.conf
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

@@ -35,14 +35,14 @@ node generate_nginx_config.js --dry-run
     {
         "domain": "example.com",
         "forwarding": "127.0.0.1:3003",
-        "ssl": true,
+        "type": "https-only",
         "ca-bundle": "cert/example.com/ca-bundle.txt",
         "private-key": "cert/example.com/private-key.txt"
     },
     {
         "domain": "api.example.com",
         "forwarding": "192.168.1.100:8000",
-        "ssl": true,
+        "type": "https",
         "rate-limit": {
             "/": 100,
             "/api": 10,
@@ -53,8 +53,7 @@ node generate_nginx_config.js --dry-run
     {
         "domain": "dev.example.com",
         "forwarding": "host.docker.internal:50030",
-        "ssl": true,
-        "http": true
+        "type": "https"
     }
 ]
 ```
@@ -66,10 +65,9 @@ node generate_nginx_config.js --dry-run
 - **`forwarding`**: Backend server address and port (e.g., "127.0.0.1:3000")
 
 ### Optional Fields
-- **`ssl`**: Enable HTTPS (default: `true`)
+- **`type`**: Connection type - "http" (HTTP only), "https" (HTTPS + HTTP forwarding), or "https-only" (HTTPS with HTTP redirect) (default: `"https-only"`)
 - **`ca-bundle`**: Path to SSL certificate file (relative to `/etc/nginx/ssl/`)
 - **`private-key`**: Path to SSL private key file (relative to `/etc/nginx/ssl/`)
-- **`http`**: Allow HTTP forwarding instead of redirecting to HTTPS (default: `false`)
 - **`rate-limit`**: Rate limiting per minute - can be a number (applies to all paths) or object with path-specific limits (default: no limits)
 - **`websocket`**: Enable WebSocket support (default: `true`)
 - **`compression`**: Enable gzip compression (default: `true`)
@@ -82,6 +80,7 @@ node generate_nginx_config.js --dry-run
 {
     "domain": "example.com",
     "forwarding": "127.0.0.1:3000",
+    "type": "https-only",
     "ca-bundle": "example.com/fullchain.pem",
     "private-key": "example.com/privkey.pem"
 }
@@ -92,34 +91,45 @@ node generate_nginx_config.js --dry-run
 {
     "domain": "example.com",
     "forwarding": "127.0.0.1:3000",
-    "ssl": true
+    "type": "https-only"
 }
 ```
 This will use:
 - Certificate: `/etc/nginx/ssl/example.com/fullchain.pem`
 - Private Key: `/etc/nginx/ssl/example.com/privkey.pem`
 
-## 🔀 HTTP Forwarding vs HTTPS Redirect
+## 🔀 Connection Type Options
 
-### Option 1: HTTP Forwarding (http: true)
+### Option 1: HTTP Only (type: "http")
+```json
+{
+    "domain": "legacy.example.com",
+    "forwarding": "192.168.1.50:80",
+    "type": "http"
+}
+```
+- Only HTTP is available, no SSL certificates required
+- HTTP requests to `http://legacy.example.com/test` are forwarded to `http://192.168.1.50:80/test`
+- Useful for legacy systems or internal services
+
+### Option 2: HTTPS with HTTP Forwarding (type: "https")
 ```json
 {
     "domain": "dev.example.com",
     "forwarding": "host.docker.internal:50030",
-    "ssl": true,
-    "http": true
+    "type": "https"
 }
 ```
 - HTTP requests to `http://dev.example.com/test` are forwarded to `http://host.docker.internal:50030/test`
 - HTTPS requests to `https://dev.example.com/test` are forwarded to `http://host.docker.internal:50030/test`
 - Useful for development environments or when backend doesn't support HTTPS
 
-### Option 2: HTTPS Redirect (http: false, default)
+### Option 3: HTTPS Only with HTTP Redirect (type: "https-only", default)
 ```json
 {
     "domain": "example.com",
     "forwarding": "127.0.0.1:3000",
-    "ssl": true
+    "type": "https-only"
 }
 ```
 - HTTP requests to `http://example.com/test` are redirected to `https://example.com/test`
@@ -183,12 +193,12 @@ The scripts automatically generate:
     {
         "domain": "website.com",
         "forwarding": "127.0.0.1:3000",
-        "ssl": true
+        "type": "https-only"
     },
     {
         "domain": "api.website.com",
         "forwarding": "127.0.0.1:8000",
-        "ssl": true,
+        "type": "https-only",
         "rate-limit": {
             "/": 300,
             "/api/v1": 100,
@@ -199,21 +209,20 @@ The scripts automatically generate:
     {
         "domain": "admin.website.com",
         "forwarding": "127.0.0.1:9000",
-        "ssl": true,
+        "type": "https-only",
         "rate-limit": 50,
         "security-headers": true
     },
     {
         "domain": "legacy.website.com",
         "forwarding": "192.168.1.50:80",
-        "ssl": false,
+        "type": "http",
         "compression": false
     },
     {
         "domain": "dev.website.com",
         "forwarding": "host.docker.internal:3001",
-        "ssl": true,
-        "http": true,
+        "type": "https",
         "security-headers": false
     }
 ]

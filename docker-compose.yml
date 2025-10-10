@@ -1,13 +1,15 @@
 services:
   # Nginx reverse proxy
   oneserver:
-    image: nginx:alpine
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: oneserver
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx-proxy.conf:/etc/nginx/nginx.conf:ro
+      - ./settings.json:/app/settings.json:ro
       - ./cert:/etc/nginx/ssl:ro
       - ./nginx-logs:/var/log/nginx
     restart: unless-stopped

@@ -45,14 +45,18 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
     elif not isinstance(rate_limit, dict):
         rate_limit = {}
 
+    # Validate type field
+    connection_type = setting.get('type', 'https-only')
+    if connection_type not in ['http', 'https', 'https-only']:
+        raise ValueError(f"Invalid type '{connection_type}'. Must be 'http', 'https', or 'https-only'")
+
     # Set defaults
     validated = {
         'domain': setting['domain'].strip(),
         'forwarding': setting['forwarding'].strip(),
-        'ssl': setting.get('ssl', True),
+        'type': connection_type,
         'ca_bundle': setting.get('ca-bundle', ''),
         'private_key': setting.get('private-key', ''),
-        'http': setting.get('http', False),
         'rate_limit': rate_limit,
         'websocket': setting.get('websocket', True),
         'compression': setting.get('compression', True),
@@ -89,8 +93,8 @@ def generate_upstream_blocks(settings: List[Dict[str, Any]]) -> str:
 def generate_http_redirect_server(settings: List[Dict[str, Any]]) -> str:
     """Generate HTTP server blocks for redirect or forwarding."""
     # Separate domains by HTTP handling preference
-    redirect_domains = [s['domain'] for s in settings if s['ssl'] and not s['http']]
-    forward_settings = [s for s in settings if s['http']]
+    redirect_domains = [s['domain'] for s in settings if s['type'] == 'https-only']
+    forward_settings = [s for s in settings if s['type'] in ['http', 'https']]
 
     blocks = []
 
@@ -322,7 +326,7 @@ def generate_nginx_config(settings: List[Dict[str, Any]]) -> str:
     # Generate SSL server blocks
     ssl_servers = []
     for setting in settings:
-        if setting['ssl']:
+        if setting['type'] in ['https', 'https-only']:
             ssl_servers.append(generate_ssl_server_block(setting))
 
     # Join SSL servers with double newlines
@@ -400,9 +404,12 @@ def main():
             print(f"✅ Nginx configuration generated successfully: {args.output}")
             print(f"📁 Configured {len(validated_settings)} domain(s):")
             for setting in validated_settings:
-                ssl_status = "🔒 HTTPS" if setting['ssl'] else "🔓 HTTP"
-                http_status = " + HTTP forwarding" if setting['http'] else ""
-                print(f"   - {setting['domain']} → {setting['host']}:{setting['port']} ({ssl_status}{http_status})")
+                type_status = {
+                    'http': '🔓 HTTP only',
+                    'https': '🔒 HTTPS + HTTP forwarding',
+                    'https-only': '🔒 HTTPS only (HTTP redirects)'
+                }[setting['type']]
+                print(f"   - {setting['domain']} → {setting['host']}:{setting['port']} ({type_status})")
         except IOError as e:
             print(f"Error writing to '{args.output}': {e}")
             sys.exit(1)
