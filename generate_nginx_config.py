@@ -60,7 +60,8 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
         'rate_limit': rate_limit,
         'websocket': setting.get('websocket', True),
         'compression': setting.get('compression', True),
-        'security_headers': setting.get('security-headers', True)
+        'security_headers': setting.get('security-headers', True),
+        'max_body_size': setting.get('max-body-size', '10m')
     }
 
     # Parse forwarding address
@@ -136,6 +137,9 @@ def generate_http_redirect_server(settings: List[Dict[str, Any]]) -> str:
     server {{
         listen 80;
         server_name {domain};
+
+        # Maximum request body size
+        client_max_body_size {setting['max_body_size']};
 
         # Allow Let's Encrypt ACME challenge
         location /.well-known/acme-challenge/ {{
@@ -263,7 +267,10 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
         server_name {domain};
 
         ssl_certificate {ssl_cert};
-        ssl_certificate_key {ssl_key};{security_headers}{main_location}{rate_limit_locations}
+        ssl_certificate_key {ssl_key};
+
+        # Maximum request body size
+        client_max_body_size {setting['max_body_size']};{security_headers}{main_location}{rate_limit_locations}
     }}"""
 
     return server_block
