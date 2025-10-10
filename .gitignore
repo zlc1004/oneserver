@@ -1,3 +1,5 @@
 cert/
 .config/
 nginx-logs/
+.vscode/
+nginx-proxy.conf
