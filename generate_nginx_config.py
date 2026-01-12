@@ -50,6 +50,23 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
     if connection_type not in ['http', 'https', 'https-only']:
         raise ValueError(f"Invalid type '{connection_type}'. Must be 'http', 'https', or 'https-only'")
 
+    # Validate allowed-paths
+    allowed_paths = setting.get('allowed-paths', [])
+    if not isinstance(allowed_paths, list):
+        raise ValueError("'allowed-paths' must be a list of path strings")
+
+    # Normalize paths (ensure they start with / and don't end with /)
+    normalized_paths = []
+    for path in allowed_paths:
+        if not isinstance(path, str):
+            raise ValueError("All entries in 'allowed-paths' must be strings")
+        normalized_path = path.strip()
+        if not normalized_path.startswith('/'):
+            normalized_path = '/' + normalized_path
+        if len(normalized_path) > 1 and normalized_path.endswith('/'):
+            normalized_path = normalized_path.rstrip('/')
+        normalized_paths.append(normalized_path)
+
     # Set defaults
     validated = {
         'domain': setting['domain'].strip(),
@@ -61,7 +78,8 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
         'websocket': setting.get('websocket', True),
         'compression': setting.get('compression', True),
         'security_headers': setting.get('security-headers', True),
-        'max_body_size': setting.get('max-body-size', '10m')
+        'max_body_size': setting.get('max-body-size', '10m'),
+        'allowed_paths': normalized_paths
     }
 
     # Parse forwarding address
@@ -90,6 +108,75 @@ def generate_upstream_blocks(settings: List[Dict[str, Any]]) -> str:
         upstreams.append(upstream)
 
     return '\n\n'.join(upstreams)
+
+def generate_location_blocks(setting: Dict[str, Any], upstream_name: str, websocket_headers: str, indent: str = "        ") -> str:
+    """Generate location blocks for allowed paths or main location."""
+    # If allowed-paths is specified, generate blocks only for those paths
+    if setting['allowed_paths']:
+        location_blocks = []
+
+        # Generate location blocks for each allowed path
+        for path in setting['allowed_paths']:
+            location_block = f"""{indent}# Allow access to {path}
+{indent}location ^~ {path}/ {{
+{indent}    proxy_pass http://{upstream_name};
+{indent}    proxy_set_header Host $host;
+{indent}    proxy_set_header X-Real-IP $remote_addr;
+{indent}    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+{indent}    proxy_set_header X-Forwarded-Proto $scheme;
+{indent}    proxy_set_header X-Forwarded-Host $host;
+{indent}    proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
+
+{indent}    # Timeouts
+{indent}    proxy_connect_timeout 60s;
+{indent}    proxy_send_timeout 60s;
+{indent}    proxy_read_timeout 60s;
+{indent}}}
+{indent}
+{indent}# Allow exact path matches
+{indent}location = {path} {{
+{indent}    proxy_pass http://{upstream_name};
+{indent}    proxy_set_header Host $host;
+{indent}    proxy_set_header X-Real-IP $remote_addr;
+{indent}    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+{indent}    proxy_set_header X-Forwarded-Proto $scheme;
+{indent}    proxy_set_header X-Forwarded-Host $host;
+{indent}    proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
+
+{indent}    # Timeouts
+{indent}    proxy_connect_timeout 60s;
+{indent}    proxy_send_timeout 60s;
+{indent}    proxy_read_timeout 60s;
+{indent}}}"""
+            location_blocks.append(location_block)
+
+        # Add catch-all 404 for non-allowed paths
+        catch_all_block = f"""
+{indent}# Block all other paths
+{indent}location / {{
+{indent}    return 404;
+{indent}}}"""
+        location_blocks.append(catch_all_block)
+
+        return '\n\n'.join(location_blocks)
+    else:
+        # Original behavior - allow all paths
+        return f"""
+{indent}# Main application
+{indent}location / {{
+{indent}    proxy_pass http://{upstream_name};
+{indent}    proxy_set_header Host $host;
+{indent}    proxy_set_header X-Real-IP $remote_addr;
+{indent}    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+{indent}    proxy_set_header X-Forwarded-Proto $scheme;
+{indent}    proxy_set_header X-Forwarded-Host $host;
+{indent}    proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
+
+{indent}    # Timeouts
+{indent}    proxy_connect_timeout 60s;
+{indent}    proxy_send_timeout 60s;
+{indent}    proxy_read_timeout 60s;
+{indent}}}"""
 
 def generate_http_redirect_server(settings: List[Dict[str, Any]]) -> str:
     """Generate HTTP server blocks for redirect or forwarding."""
@@ -146,21 +233,7 @@ def generate_http_redirect_server(settings: List[Dict[str, Any]]) -> str:
             root /var/www/certbot;
         }}
 
-        # Forward traffic to backend
-        location / {{
-            proxy_pass http://{upstream_name};
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Forwarded-Host $host;
-            proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
-
-            # Timeouts
-            proxy_connect_timeout 60s;
-            proxy_send_timeout 60s;
-            proxy_read_timeout 60s;
-        }}
+        # Forward traffic to backend{generate_location_blocks(setting, upstream_name, websocket_headers)}
     }}"""
         blocks.append(forward_block)
 
@@ -240,10 +313,12 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
 
         rate_limit_locations = ''.join(locations)
 
-    # Main location block (only if no rate limiting or no root path rate limit)
+    # Main location block (only if no rate limiting or no root path rate limit and no allowed-paths restriction)
     main_location = ""
     if not setting['rate_limit'] or '/' not in setting['rate_limit']:
-        main_location = f"""
+        if not setting['allowed_paths']:
+            # Only generate default location block if no allowed-paths restriction
+            main_location = f"""
         # Main application
         location / {{
             proxy_pass http://{upstream_name};
@@ -259,6 +334,9 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
             proxy_send_timeout 60s;
             proxy_read_timeout 60s;
         }}"""
+        else:
+            # Generate allowed-paths location blocks
+            main_location = generate_location_blocks(setting, upstream_name, websocket_headers)
 
     server_block = f"""    # {domain} - Forward to {setting['host']}:{setting['port']}
     server {{

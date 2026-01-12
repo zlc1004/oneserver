@@ -1,16 +1,58 @@
 [
     {
-        "domain": "example.com",
-        "forwarding": "127.0.0.1:3003",
+        // Required: domain name to proxy
+        "domain": "app.example.com",
+        // Required: target server (format: "host:port" or "host", defaults to port 80)
+        "forwarding": "localhost:3000",
+        // Optional: "http" (HTTP only), "https" (HTTP+HTTPS), "https-only" (HTTP redirects to HTTPS)
         "type": "https-only",
-        "ca-bundle": "cert/example.com/ca-bundle.txt",
-        "private-key": "cert/example.com/private-key.txt"
+        // Optional: SSL certificate bundle file name (if not provided, uses Let's Encrypt paths)
+        "ca-bundle": "app.example.com.crt",
+        // Optional: SSL private key file name (if not provided, uses Let's Encrypt paths)
+        "private-key": "app.example.com.key",
+        // Optional: Whitelist of allowed paths - only these paths will be forwarded, others return 404
+        // Example: ["/api", "/cdn"] allows /api/*, /cdn/*, but blocks /admin, /test, etc.
+        "allowed-paths": ["/api", "/cdn", "/public"],
+        // Optional: Rate limiting - object format for path-specific limits (requests per minute)
+        "rate-limit": {
+            "/api/auth/*": 10,
+            "/api/*": 100,
+            "/uploads/*": 5,
+            "/": 50
+        },
+        // Optional: Enable WebSocket support - true (default) or false
+        "websocket": true,
+        // Optional: Enable gzip compression - true (default) or false
+        "compression": true,
+        // Optional: Add security headers (X-Frame-Options, X-XSS-Protection, etc.) - true (default) or false
+        "security-headers": true,
+        // Optional: Maximum request body size - format: "10m", "1g", "500k" (default: "10m")
+        "max-body-size": "25m"
     },
     {
         "domain": "api.example.com",
-        "forwarding": "192.168.1.100:8000",
+        "forwarding": "192.168.1.100:8080",
+        // Different type: allows both HTTP and HTTPS forwarding
         "type": "https",
+        // Rate limiting - simple number format applies to all paths
         "rate-limit": 200,
-        "websocket": false
+        // WebSocket disabled
+        "websocket": false,
+        // Compression disabled
+        "compression": false,
+        // Security headers disabled
+        "security-headers": false,
+        "max-body-size": "100m"
+    },
+    {
+        "domain": "legacy.example.com",
+        "forwarding": "old-server.internal",
+        // HTTP only - no SSL/HTTPS
+        "type": "http",
+        // No allowed-paths restriction - all paths forwarded
+        "allowed-paths": [],
+        // No rate limiting
+        "rate-limit": {},
+        "max-body-size": "1g"
     }
 ]
