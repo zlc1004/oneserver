@@ -445,7 +445,8 @@ http {{
     tcp_nopush on;
     tcp_nodelay on;
     keepalive_timeout 65;
-    types_hash_max_size 2048;{gzip_config}{rate_limit_zones}
+    types_hash_max_size 2048;
+    server_names_hash_bucket_size 128;{gzip_config}{rate_limit_zones}
 
     # SSL configuration
     ssl_protocols TLSv1.2 TLSv1.3;
