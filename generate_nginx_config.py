@@ -78,7 +78,7 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
         'websocket': setting.get('websocket', True),
         'compression': setting.get('compression', True),
         'security_headers': setting.get('security-headers', True),
-        'csp_unsafe_eval': setting.get('csp-unsafe-eval', False),
+        'csp_unsafe_eval': setting.get('csp-unsafe-eval'),
         'timeout': setting.get('timeout', '120s'),
         'max_body_size': setting.get('max-body-size', '10m'),
         'allowed_paths': normalized_paths
@@ -258,17 +258,20 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
     # Security headers
     security_headers = ""
     if setting['security_headers']:
-        # Determine CSP header based on csp_unsafe_eval setting
-        csp_header = "default-src 'self' http: https: data: blob: 'unsafe-inline'"
-        if setting['csp_unsafe_eval']:
-            csp_header = "script-src 'self' 'unsafe-eval'"
+        csp_header = ""
+        if setting['csp_unsafe_eval'] is True:
+            csp_header = "script-src 'self' 'unsafe-eval'; default-src 'self' http: https: data: blob: 'unsafe-inline'"
+        elif setting['csp_unsafe_eval'] is False:
+            csp_header = "default-src 'self' http: https: data: blob: 'unsafe-inline'"
 
         security_headers = '''
         # Security headers
         add_header X-Frame-Options "SAMEORIGIN" always;
         add_header X-XSS-Protection "1; mode=block" always;
         add_header X-Content-Type-Options "nosniff" always;
-        add_header Referrer-Policy "no-referrer-when-downgrade" always;
+        add_header Referrer-Policy "no-referrer-when-downgrade" always;'''
+        if csp_header:
+            security_headers += '''
         add_header Content-Security-Policy "''' + csp_header + '''" always;'''
 
     # WebSocket support
