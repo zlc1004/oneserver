@@ -26,6 +26,10 @@
         "compression": true,
         // Optional: Add security headers (X-Frame-Options, X-XSS-Protection, etc.) - true (default) or false
         "security-headers": true,
+        // Optional: Allow 'unsafe-eval' in CSP header for apps that need eval() - true or false (default: false)
+        "csp-unsafe-eval": false,
+        // Optional: Proxy timeout - format: "60s", "120s", "5m" (default: "120s")
+        "timeout": "120s",
         // Optional: Maximum request body size - format: "10m", "1g", "500k" (default: "10m")
         "max-body-size": "25m"
     },

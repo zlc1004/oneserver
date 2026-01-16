@@ -79,6 +79,7 @@ def validate_setting(setting: Dict[str, Any]) -> Dict[str, Any]:
         'compression': setting.get('compression', True),
         'security_headers': setting.get('security-headers', True),
         'csp_unsafe_eval': setting.get('csp-unsafe-eval', False),
+        'timeout': setting.get('timeout', '120s'),
         'max_body_size': setting.get('max-body-size', '10m'),
         'allowed_paths': normalized_paths
     }
@@ -110,7 +111,7 @@ def generate_upstream_blocks(settings: List[Dict[str, Any]]) -> str:
 
     return '\n\n'.join(upstreams)
 
-def generate_location_blocks(setting: Dict[str, Any], upstream_name: str, websocket_headers: str, indent: str = "        ") -> str:
+def generate_location_blocks(setting: Dict[str, Any], upstream_name: str, websocket_headers: str, timeout: str, indent: str = "        ") -> str:
     """Generate location blocks for allowed paths or main location."""
     # If allowed-paths is specified, generate blocks only for those paths
     if setting['allowed_paths']:
@@ -129,9 +130,9 @@ def generate_location_blocks(setting: Dict[str, Any], upstream_name: str, websoc
 {indent}    proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
 
 {indent}    # Timeouts
-{indent}    proxy_connect_timeout 60s;
-{indent}    proxy_send_timeout 60s;
-{indent}    proxy_read_timeout 60s;
+{indent}    proxy_connect_timeout {timeout};
+{indent}    proxy_send_timeout {timeout};
+{indent}    proxy_read_timeout {timeout};
 {indent}}}
 {indent}
 {indent}# Allow exact path matches
@@ -145,9 +146,9 @@ def generate_location_blocks(setting: Dict[str, Any], upstream_name: str, websoc
 {indent}    proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
 
 {indent}    # Timeouts
-{indent}    proxy_connect_timeout 60s;
-{indent}    proxy_send_timeout 60s;
-{indent}    proxy_read_timeout 60s;
+{indent}    proxy_connect_timeout {timeout};
+{indent}    proxy_send_timeout {timeout};
+{indent}    proxy_read_timeout {timeout};
 {indent}}}"""
             location_blocks.append(location_block)
 
@@ -174,9 +175,9 @@ def generate_location_blocks(setting: Dict[str, Any], upstream_name: str, websoc
 {indent}    proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
 
 {indent}    # Timeouts
-{indent}    proxy_connect_timeout 60s;
-{indent}    proxy_send_timeout 60s;
-{indent}    proxy_read_timeout 60s;
+{indent}    proxy_connect_timeout {timeout};
+{indent}    proxy_send_timeout {timeout};
+{indent}    proxy_read_timeout {timeout};
 {indent}}}"""
 
 def generate_http_redirect_server(settings: List[Dict[str, Any]]) -> str:
@@ -234,7 +235,7 @@ def generate_http_redirect_server(settings: List[Dict[str, Any]]) -> str:
             root /var/www/certbot;
         }}
 
-        # Forward traffic to backend{generate_location_blocks(setting, upstream_name, websocket_headers)}
+        # Forward traffic to backend{generate_location_blocks(setting, upstream_name, websocket_headers, setting['timeout'])}
     }}"""
         blocks.append(forward_block)
 
@@ -311,9 +312,9 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
             proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
 
             # Timeouts
-            proxy_connect_timeout 60s;
-            proxy_send_timeout 60s;
-            proxy_read_timeout 60s;
+            proxy_connect_timeout {setting['timeout']};
+            proxy_send_timeout {setting['timeout']};
+            proxy_read_timeout {setting['timeout']};
         }}"""
                 locations.append(location_block)
 
@@ -336,13 +337,13 @@ def generate_ssl_server_block(setting: Dict[str, Any]) -> str:
             proxy_set_header X-Forwarded-Port $server_port;{websocket_headers}
 
             # Timeouts
-            proxy_connect_timeout 60s;
-            proxy_send_timeout 60s;
-            proxy_read_timeout 60s;
+            proxy_connect_timeout {setting['timeout']};
+            proxy_send_timeout {setting['timeout']};
+            proxy_read_timeout {setting['timeout']};
         }}"""
         else:
             # Generate allowed-paths location blocks
-            main_location = generate_location_blocks(setting, upstream_name, websocket_headers)
+            main_location = generate_location_blocks(setting, upstream_name, websocket_headers, setting['timeout'])
 
     server_block = f"""    # {domain} - Forward to {setting['host']}:{setting['port']}
     server {{
