@@ -18,5 +18,3 @@ services:
 networks:
   oneserver_bridge:
       name: oneserver_bridge
-      external: true
-      attachable: true
