@@ -12,3 +12,11 @@ services:
       - ./cert:/etc/nginx/ssl:ro
       - ./nginx-logs:/var/log/nginx
     restart: unless-stopped
+    networks:
+      - oneserver_bridge
+
+networks:
+  oneserver_bridge:
+      name: oneserver_bridge
+      external: true
+      attachable: true
