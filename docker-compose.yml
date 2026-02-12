@@ -9,8 +9,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./cert:/etc/nginx/ssl:ro
-      - ./nginx-logs:/var/log/nginx
+      - ${ONESERVER_PWD:-.}/cert:/etc/nginx/ssl:ro
+      - ${ONESERVER_PWD:-.}/nginx-logs:/var/log/nginx
     restart: unless-stopped
     networks:
       - oneserver_bridge
